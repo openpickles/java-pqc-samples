@@ -28,6 +28,9 @@ In TLS 1.3, the cryptographic handshake is split into two distinct parts:
 **The Hybrid Approach:**
 Even though `server.jks` looks like a standard EC keystore, **TLS 1.3 uses a Post-Quantum Key Encapsulation Mechanism (like ML-KEM or Kyber)** for the *Key Exchange*. BouncyCastle JSSE implicitly prefers hybrid PQC key shares out of the box when PQC providers are loaded. This secures the connection data against "harvest now, decrypt later" quantum attacks while maintaining standard authentication compatibility.
 
+### Why BouncyCastle in Java 25?
+Although Java 25 intrinsically supplies Post-Quantum mathematical primitives (`ML-KEM` and `ML-DSA`) via the `SunJCE` provider natively, the standard Java Secure Socket Extension (`SunJSSE`) does not yet bridge these algorithms into standard TLS 1.3 `NamedGroups` for the `key_share` extension. Therefore, `BouncyCastleJsseProvider` is strictly required to negotiate Post-Quantum sockets until native standard integration is complete.
+
 ## Quickstart
 
 The keystores are statically provided inside the `certs/` directory for immediate testing. 
