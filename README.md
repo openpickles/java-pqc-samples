@@ -12,7 +12,8 @@ It provides a client-server TLS 1.3 connection backed by the `bctls-jdk18on` pro
 ## Structure
 
 * `src/main/java/com/example/pqc/CertGenerator.java`
-  * Programmatically generates test `server.jks` and `truststore.jks` utilizing a PQC provider for the core elements (falling back to EC wrapper if strict JCA builder mismatch occurs).
+  * Programmatically generates test `server.jks` and `truststore.jks` utilizing a PQC provider for the core elements (falling back to EC wrapper if strict JCA builder 
+  mismatch occurs).
 * `src/main/java/com/example/pqc/PqcServer.java`
   * Implements `SSLServerSocket` mapped strictly to `BouncyCastleJsseProvider`. This provider enables hybrid / explicit PQC key encapsulations (like `x25519+kyber768` or `ML-KEM`).
 * `src/main/java/com/example/pqc/PqcClient.java`
@@ -54,19 +55,44 @@ To explicitly observe the PQC Key Exchange being selected, the `start-server.sh`
 If you want to **strictly force** the Java socket to accept nothing but PQC key exchanges (proving it works!), pass the `jdk.tls.namedGroups` JVM property configured to a PQC encapsulation mechanism (like `mlkem768`):
 
 ```bash
-java -Djdk.tls.namedGroups=mlkem768 -cp target/java-pqc-tls-demo-1.0-SNAPSHOT.jar com.example.pqc.PqcServer
+## (Optional) Pure PQC Authentication (ML-DSA) with Tomcat 11
+
+Java 25 intrinsically supports generating fully Post-Quantum ML-DSA certificates natively via the `SunJCE` provider, meaning we can configure a secure Tomcat 11 container relying strictly on Java 25 primitives (without BouncyCastle or OpenSSL libraries!).
+
+However, **OpenJDK 25's `SunJSSE` TLS 1.3 implementation does not natively map ML-DSA certificates into the handshake Cipher Suites yet.** Therefore, connecting pure Java clients to this server will gracefully result in standard handshake rejections (`handshake_failure`) demonstrating exactly the missing JSSE mapping capability!
+
+You can execute this fascinating Pure JSSE test setup seamlessly with the provided Tomcat distribution:
+
+### 1. The Pre-Packaged Tomcat 11 Directory
+This repository already contains a cleanly extracted Tomcat 11 container inside the `tomcat/` folder. It has been stripped of the OpenSSL (APR) listener bridging inside `tomcat/conf/server.xml` to guarantee it only processes security algorithms using pure native Java mechanisms:
+
+```xml
+<Connector port="8443" protocol="org.apache.coyote.http11.Http11NioProtocol"
+           maxThreads="150" SSLEnabled="true"
+           sslImplementationName="org.apache.tomcat.util.net.jsse.JSSEImplementation">
+    <SSLHostConfig>
+        <Certificate certificateKeystoreFile="conf/mldsa.jks" certificateKeystorePassword="password" />
+    </SSLHostConfig>
+</Connector>
 ```
 
-## (Optional) Pure PQC Authentication (ML-DSA)
-
-If you wish to experiment with **Pure PQC Authentication** where the certificate itself is signed using Post-Quantum cryptography (instead of ECDSA):
-
-1. Edit `src/main/java/com/example/pqc/CertGenerator.java`
-2. Change the key algorithm: `String keyAlgName = "ML-DSA-65";`
-3. Change the signer: `.setProvider(BouncyCastleProvider.PROVIDER_NAME).build(keyPair.getPrivate());` with algorithm `"ML-DSA-65"`
-4. Re-run:
+### 2. Generate ML-DSA Keystores and Start the Test
+Run the prepared scripts which utilize Native Java 25 `keytool` capabilities (No BouncyCastle) to construct true PQC keystores and boot the Tomcat Server!
 ```bash
-mvn clean compile exec:java -Dexec.mainClass="com.example.pqc.CertGenerator"
+./scripts/setup-tomcat-pqc.sh
+./scripts/start-tomcat-server.sh
 ```
 
-*Note: Generating a strict ML-DSA certificate will break simple TLS 1.3 compatibilities because standard JSSE clients do not natively advertise `ML-DSA` in their `signature_algorithms` without explicit overrides.*
+### 3. Validate ML-DSA Rejection (Browser / Client)
+Because Tomcat successfully serves a 100% pure Post-Quantum authentication certificate, modern clients will fail to negotiate the cipher blocks until standards evolve.
+
+**Test via Browser:** 
+Open your web browser and navigate to `https://localhost:8443`.
+You will receive an immediate `ERR_SSL_PROTOCOL_ERROR` or `ERR_CONNECTION_CLOSED` because standard browsers (Chrome, Firefox, Safari) do not yet understand ML-DSA signatures natively.
+
+**Test via Pure Java:** 
+Try negotiating the Pure PQC connection against Tomcat from the client script:
+```bash
+./scripts/start-tomcat-client.sh
+```
+You will securely observe Java 25 `SunJSSE` dropping the peer connection due to TLS 1.3 `handshake_failure` proving that standard `NamedGroup` specifications are eagerly awaiting future JDK updates!
